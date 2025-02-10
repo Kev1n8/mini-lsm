@@ -296,16 +296,24 @@ impl LsmStorageInner {
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         let read_guard = self.state.read();
         let res = read_guard.memtable.get(key);
-        Ok(match res {
-            Some(val) => {
+        // Found in the active memtable.
+        if let Some(val) = res {
+            if !val.is_empty() {
+                return Ok(Some(val));
+            } else {
+                return Ok(None);
+            }
+        }
+        for memtable in read_guard.imm_memtables.iter() {
+            if let Some(val) = memtable.get(key) {
                 if !val.is_empty() {
-                    Some(val)
+                    return Ok(Some(val));
                 } else {
-                    None
+                    return Ok(None);
                 }
             }
-            _ => None,
-        })
+        }
+        Ok(None)
     }
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
@@ -316,7 +324,13 @@ impl LsmStorageInner {
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         let r = self.state.read();
-        r.memtable.put(key, value)
+        r.memtable.put(key, value)?;
+        if r.memtable.approximate_size() >= self.options.target_sst_size {
+            let state_guard = self.state_lock.lock();
+            drop(r);
+            self.force_freeze_memtable(&state_guard)?;
+        }
+        Ok(())
     }
 
     /// Remove a key from the storage by writing an empty value.
@@ -346,11 +360,12 @@ impl LsmStorageInner {
 
     /// Force freeze the current memtable to an immutable memtable
     pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+        let mut guard = self.state.write();
+        let mut snapshot = guard.as_ref().clone();
         let new_memtable = MemTable::create(self.next_sst_id());
-        let old = self.state.read().memtable.clone();
-        let mut w = self.state.write();
-        w.imm_memtables.push(old);
-        w.memtable = Arc::new(new_memtable);
+        let old_memtable = std::mem::replace(&mut snapshot.memtable, Arc::new(new_memtable));
+        snapshot.imm_memtables.insert(0, old_memtable);
+        *guard = Arc::new(snapshot);
         Ok(())
     }
 
