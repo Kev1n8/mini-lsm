@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use std::cmp::{self};
+use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
 
 use anyhow::Result;
@@ -58,8 +56,38 @@ pub struct MergeIterator<I: StorageIterator> {
 }
 
 impl<I: StorageIterator> MergeIterator<I> {
+    /// Load all iters into heap.
+    ///
+    /// Ignore invalid iters. If all is invalid, push the oldest iter.
     pub fn create(iters: Vec<Box<I>>) -> Self {
-        unimplemented!()
+        if iters.is_empty() {
+            return Self {
+                iters: BinaryHeap::new(),
+                current: None,
+            };
+        }
+
+        let mut iters = iters;
+        let mut heap = BinaryHeap::<HeapWrapper<I>>::new();
+        // Make sure there's at least 1 iter in the heap, for `pop()` below.
+        if iters.iter().all(|iter| !iter.is_valid()) {
+            return Self {
+                iters: heap,
+                current: Some(HeapWrapper(0, iters.pop().unwrap())),
+            };
+        }
+
+        for (idx, iter) in iters.into_iter().enumerate() {
+            if iter.is_valid() {
+                heap.push(HeapWrapper(idx, iter));
+            }
+        }
+
+        let current = heap.pop().unwrap();
+        Self {
+            iters: heap,
+            current: Some(current),
+        }
     }
 }
 
@@ -69,18 +97,64 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     type KeyType<'a> = KeySlice<'a>;
 
     fn key(&self) -> KeySlice {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.key()
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.value()
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.current
+            .as_ref()
+            .map(|cur| cur.1.is_valid())
+            .unwrap_or(false)
     }
 
+    /// Update state of MergeIterator to its next.
+    ///
+    /// Steps:
+    /// 1. Call `heap.top.next()` until the key is different or all iters in heap are popped.
+    ///    It could happen that heap.top is invalid, should pop.
+    /// 2. Call `current.next()`.
+    /// 3. Compare the key between current and top, swap if necessary.
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        // Guaranteed that next is called with present current.
+        let current = self.current.as_mut().unwrap();
+        while let Some(mut top) = self.iters.peek_mut() {
+            if current.1.key().eq(&top.1.key()) {
+                if let e @ Err(_) = top.1.next() {
+                    PeekMut::pop(top);
+                    return e;
+                }
+
+                if !top.1.is_valid() {
+                    PeekMut::pop(top);
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Not the `top` is either `None` or it has a different key compared with `current`.
+        current.1.next()?; // Is this a good practice? Maybe need to handle it.
+
+        // `current` could be invalid.
+        if !current.1.is_valid() {
+            if let Some(top) = self.iters.pop() {
+                *current = top;
+            }
+            return Ok(());
+        }
+
+        // May need to swap if `top` has smaller key.
+        if let Some(mut top) = self.iters.peek_mut() {
+            if *current < *top {
+                // Note that we are trying to put the "larger" item in front.
+                std::mem::swap(current, &mut top);
+            }
+        }
+
+        Ok(())
     }
 }
