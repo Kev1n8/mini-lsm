@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::cmp::{self};
 use std::collections::BinaryHeap;
@@ -59,7 +57,18 @@ pub struct MergeIterator<I: StorageIterator> {
 
 impl<I: StorageIterator> MergeIterator<I> {
     pub fn create(iters: Vec<Box<I>>) -> Self {
-        unimplemented!()
+        let mut heap = BinaryHeap::<HeapWrapper<I>>::new();
+        for (idx, mut iter) in iters.into_iter().enumerate() {
+            loop {
+                let cl = iter.as_ref().clone();
+                let snap = HeapWrapper(idx, );
+                heap.push(snap);
+            }
+        }
+        Self {
+            iters: todo!(),
+            current: todo!(),
+        }
     }
 }
 
