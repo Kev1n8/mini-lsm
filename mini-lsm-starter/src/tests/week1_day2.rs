@@ -329,3 +329,55 @@ fn test_task4_integration() {
         assert!(!iter.is_valid());
     }
 }
+
+#[test]
+fn test_bonus_scan_range() {
+    let dir = tempdir().unwrap();
+    let storage = Arc::new(
+        LsmStorageInner::open(dir.path(), LsmStorageOptions::default_for_week1_test()).unwrap(),
+    );
+    storage.put(b"1", b"233").unwrap();
+    storage.put(b"2", b"2333").unwrap();
+    storage.put(b"3", b"23333").unwrap();
+    storage
+        .force_freeze_memtable(&storage.state_lock.lock())
+        .unwrap();
+    storage.delete(b"1").unwrap();
+    storage.delete(b"2").unwrap();
+    storage.put(b"3", b"2333").unwrap();
+    storage.put(b"4", b"23333").unwrap();
+    storage
+        .force_freeze_memtable(&storage.state_lock.lock())
+        .unwrap();
+    storage.put(b"1", b"233333").unwrap();
+    storage.put(b"3", b"233333").unwrap();
+    {
+        let mut iter = storage.scan_rg(..).unwrap();
+        check_lsm_iter_result_by_key(
+            &mut iter,
+            vec![
+                (Bytes::from_static(b"1"), Bytes::from_static(b"233333")),
+                (Bytes::from_static(b"3"), Bytes::from_static(b"233333")),
+                (Bytes::from_static(b"4"), Bytes::from_static(b"23333")),
+            ],
+        );
+        assert!(!iter.is_valid());
+        iter.next().unwrap();
+        iter.next().unwrap();
+        iter.next().unwrap();
+        assert!(!iter.is_valid());
+    }
+    {
+        let (start, end) = (b"2".as_ref(), b"3".as_ref());
+        let mut iter = storage.scan_rg(start..=end).unwrap();
+        check_lsm_iter_result_by_key(
+            &mut iter,
+            vec![(Bytes::from_static(b"3"), Bytes::from_static(b"233333"))],
+        );
+        assert!(!iter.is_valid());
+        iter.next().unwrap();
+        iter.next().unwrap();
+        iter.next().unwrap();
+        assert!(!iter.is_valid());
+    }
+}

@@ -16,7 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
-use std::ops::Bound;
+use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -244,6 +244,47 @@ impl MiniLsm {
     }
 }
 
+pub trait IntoBounds<'a> {
+    fn into_bounds(self) -> (Bound<&'a [u8]>, Bound<&'a [u8]>);
+}
+
+impl<'a> IntoBounds<'a> for Range<&'a [u8]> {
+    fn into_bounds(self) -> (Bound<&'a [u8]>, Bound<&'a [u8]>) {
+        (Bound::Included(self.start), Bound::Excluded(self.end))
+    }
+}
+
+impl<'a> IntoBounds<'a> for RangeFrom<&'a [u8]> {
+    fn into_bounds(self) -> (Bound<&'a [u8]>, Bound<&'a [u8]>) {
+        (Bound::Included(self.start), Bound::Unbounded)
+    }
+}
+
+impl<'a> IntoBounds<'a> for RangeFull {
+    fn into_bounds(self) -> (Bound<&'a [u8]>, Bound<&'a [u8]>) {
+        (Bound::Unbounded, Bound::Unbounded)
+    }
+}
+
+impl<'a> IntoBounds<'a> for RangeTo<&'a [u8]> {
+    fn into_bounds(self) -> (Bound<&'a [u8]>, Bound<&'a [u8]>) {
+        (Bound::Unbounded, Bound::Excluded(self.end))
+    }
+}
+
+impl<'a> IntoBounds<'a> for RangeToInclusive<&'a [u8]> {
+    fn into_bounds(self) -> (Bound<&'a [u8]>, Bound<&'a [u8]>) {
+        (Bound::Unbounded, Bound::Included(self.end))
+    }
+}
+
+impl<'a> IntoBounds<'a> for RangeInclusive<&'a [u8]> {
+    fn into_bounds(self) -> (Bound<&'a [u8]>, Bound<&'a [u8]>) {
+        let (start, end) = self.into_inner();
+        (Bound::Included(start), Bound::Included(end))
+    }
+}
+
 impl LsmStorageInner {
     pub(crate) fn next_sst_id(&self) -> usize {
         self.next_sst_id
@@ -409,12 +450,18 @@ impl LsmStorageInner {
         Ok(FusedIterator::new(lsm_iter))
     }
 
+    pub fn scan_rg<'a>(&self, rg: impl IntoBounds<'a>) -> Result<FusedIterator<LsmIterator>> {
+        let (lower, upper) = rg.into_bounds();
+        println!("{:?} -> {:?}", lower, upper);
+        self.scan(lower, upper)
+    }
+
     pub fn list_all_items(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) {
         let mut iter = self.scan(lower, upper).unwrap();
         loop {
             println!(
                 "{:?}, {:?}",
-                Bytes::copy_from_slice(iter.key().as_ref()),
+                Bytes::copy_from_slice(iter.key()),
                 Bytes::copy_from_slice(iter.value())
             );
             iter.next().unwrap();

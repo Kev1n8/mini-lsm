@@ -172,7 +172,7 @@ pub struct MemTableIterator {
 }
 
 impl MemTableIterator {
-    pub fn entry_to_item(
+    pub fn entry_to_tuple(
         entry: Option<crossbeam_skiplist::map::Entry<Bytes, Bytes>>,
     ) -> (Bytes, Bytes) {
         entry
@@ -198,7 +198,7 @@ impl StorageIterator for MemTableIterator {
     }
 
     fn next(&mut self) -> Result<()> {
-        let entry = self.with_iter_mut(|iter| MemTableIterator::entry_to_item(iter.next()));
+        let entry = self.with_iter_mut(|iter| MemTableIterator::entry_to_tuple(iter.next()));
         self.with_item_mut(|item| *item = entry);
         Ok(())
     }
