@@ -50,8 +50,15 @@ impl StorageIterator for LsmIterator {
         self.inner.value()
     }
 
+    /// Next till not tombstone.
     fn next(&mut self) -> Result<()> {
-        self.inner.next()
+        loop {
+            self.inner.next()?;
+            if !self.is_valid() || !self.value().is_empty() {
+                break;
+            }
+        }
+        Ok(())
     }
 }
 

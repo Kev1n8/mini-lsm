@@ -120,10 +120,6 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     /// 3. Compare the key between current and top, swap if necessary.
     fn next(&mut self) -> Result<()> {
         // Guaranteed that next is called with present current.
-        debug_assert!(
-            self.current.is_some(),
-            "current in MergeIterator is not some."
-        );
         let current = self.current.as_mut().unwrap();
         while let Some(mut top) = self.iters.peek_mut() {
             if current.1.key().eq(&top.1.key()) {
