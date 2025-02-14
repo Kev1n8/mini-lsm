@@ -102,6 +102,27 @@ impl Block {
 
         Self { data, offsets }
     }
+
+    /// Return the offset of given start key.
+    pub fn find_offset(&self, key: &[u8]) -> (usize, u16) {
+        if self.offsets.is_empty() {
+            return (0, 0);
+        }
+        // TODO: Use binary search.
+        for (i, &offset) in self.offsets.iter().enumerate() {
+            let key_len = u16::from_le_bytes(
+                self.data[offset as usize..offset as usize + 2]
+                    .try_into()
+                    .expect(ERR_MSG),
+            ) as usize;
+            let key_start = offset as usize + 2;
+            let key_end = key_start + key_len;
+            if &self.data[key_start..key_end] == key {
+                return (i, offset);
+            }
+        }
+        (self.offsets.len() - 1, *self.offsets.last().expect(ERR_MSG))
+    }
 }
 
 #[cfg(test)]

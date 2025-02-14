@@ -102,9 +102,17 @@ fn as_bytes(x: &[u8]) -> Bytes {
     Bytes::copy_from_slice(x)
 }
 
+// TODO: Fix THIS.
 #[test]
 fn test_block_iterator() {
     let block = Arc::new(generate_block());
+    let mut iter = BlockIterator::create_and_seek_to_first(block.clone());
+    for _ in 0..num_of_keys() {
+        let key = iter.key();
+        let val = iter.value();
+        println!("{:?}\n {:?}", as_bytes(key.raw_ref()), as_bytes(val));
+        iter.next();
+    }
     let mut iter = BlockIterator::create_and_seek_to_first(block);
     for _ in 0..5 {
         for i in 0..num_of_keys() {
