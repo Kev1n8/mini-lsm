@@ -32,7 +32,7 @@ use crate::compact::{
 };
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::StorageIterator;
-use crate::lsm_iterator::{FusedIterator, LsmIterator};
+use crate::lsm_iterator::{ForegroundIterator, FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
@@ -439,12 +439,7 @@ impl LsmStorageInner {
             iters.push(Box::new(imm.scan(lower, upper)));
         }
 
-        // Create `MergeIterator`, skip any tombstone.
-        let mut merge_iter = MergeIterator::create(iters);
-        while merge_iter.value().is_empty() {
-            merge_iter.next()?;
-        }
-
+        let merge_iter = MergeIterator::create(iters);
         let lsm_iter = LsmIterator::new(merge_iter)?;
 
         Ok(FusedIterator::new(lsm_iter))
@@ -452,8 +447,15 @@ impl LsmStorageInner {
 
     pub fn scan_rg<'a>(&self, rg: impl IntoBounds<'a>) -> Result<FusedIterator<LsmIterator>> {
         let (lower, upper) = rg.into_bounds();
-        println!("{:?} -> {:?}", lower, upper);
         self.scan(lower, upper)
+    }
+
+    pub fn scan_foreguard(
+        &self,
+        lower: Bound<&[u8]>,
+        upper: Bound<&[u8]>,
+    ) -> Result<ForegroundIterator<LsmIterator>> {
+        todo!()
     }
 
     pub fn list_all_items(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) {
