@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 mod builder;
 mod iterator;
 
@@ -117,7 +114,7 @@ impl Block {
             ) as usize;
             let key_start = offset as usize + 2;
             let key_end = key_start + key_len;
-            if &self.data[key_start..key_end] == key {
+            if &self.data[key_start..key_end] >= key {
                 return (i, offset);
             }
         }

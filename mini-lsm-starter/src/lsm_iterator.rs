@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use std::{
     ops::Bound,
     sync::Arc,
@@ -210,7 +207,8 @@ impl ForegroundIterator<LsmIterator> {
 }
 
 impl StorageIterator for ForegroundIterator<LsmIterator> {
-    type KeyType<'a> = <LsmIterator as StorageIterator>::KeyType<'a>
+    type KeyType<'a>
+        = <LsmIterator as StorageIterator>::KeyType<'a>
     where
         Self: 'a;
 

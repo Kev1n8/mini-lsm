@@ -102,17 +102,9 @@ fn as_bytes(x: &[u8]) -> Bytes {
     Bytes::copy_from_slice(x)
 }
 
-// TODO: Fix THIS.
 #[test]
 fn test_block_iterator() {
     let block = Arc::new(generate_block());
-    let mut iter = BlockIterator::create_and_seek_to_first(block.clone());
-    for _ in 0..num_of_keys() {
-        let key = iter.key();
-        let val = iter.value();
-        println!("{:?}\n {:?}", as_bytes(key.raw_ref()), as_bytes(val));
-        iter.next();
-    }
     let mut iter = BlockIterator::create_and_seek_to_first(block);
     for _ in 0..5 {
         for i in 0..num_of_keys() {
@@ -143,7 +135,9 @@ fn test_block_seek_key() {
     let block = Arc::new(generate_block());
     let mut iter = BlockIterator::create_and_seek_to_key(block, key_of(0).as_key_slice());
     for offset in 1..=5 {
+        println!("{offset}");
         for i in 0..num_of_keys() {
+            println!("\t{i}");
             let key = iter.key();
             let value = iter.value();
             assert_eq!(
@@ -160,6 +154,7 @@ fn test_block_seek_key() {
                 as_bytes(&value_of(i)),
                 as_bytes(value)
             );
+            println!("\t{}", &format!("key_{:03}", i * 5 + offset));
             iter.seek_to_key(KeySlice::for_testing_from_slice_no_ts(
                 &format!("key_{:03}", i * 5 + offset).into_bytes(),
             ));

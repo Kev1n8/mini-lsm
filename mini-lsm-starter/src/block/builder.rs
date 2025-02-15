@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
@@ -88,7 +85,7 @@ impl BlockBuilder {
 }
 
 fn build_entry(key: &[u8], val: &[u8]) -> Vec<u8> {
-    let mut key_part = build_part(&key);
+    let mut key_part = build_part(key);
     let mut value_part = build_part(val);
 
     key_part.append(&mut value_part);

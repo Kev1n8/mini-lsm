@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use crate::key::{KeySlice, KeyVec};
@@ -47,8 +49,8 @@ impl BlockIterator {
     pub fn create_and_seek_to_first(block: Arc<Block>) -> Self {
         debug_assert!(!block.offsets.is_empty(), "sstable block is empty");
 
-        let (key_st, key_ed) = parse_range(&block.data[..]);
-        let value_range = parse_range(&block.data[key_ed..]);
+        let (key_st, key_ed) = parse_range(&block.data[..], 0);
+        let value_range = parse_range(&block.data[..], key_ed);
 
         let first_key = block.data[key_st..key_ed].to_vec();
 
@@ -67,8 +69,8 @@ impl BlockIterator {
 
         let (idx, offset) = block.find_offset(key.raw_ref());
 
-        let (key_st, key_ed) = parse_range(&block.data[offset as usize..]);
-        let value_range = parse_range(&block.data[key_ed..]);
+        let (key_st, key_ed) = parse_range(&block.data[..], offset as usize);
+        let value_range = parse_range(&block.data[..], key_ed);
 
         let key_raw = block.data[key_st..key_ed].to_vec();
 
@@ -100,8 +102,8 @@ impl BlockIterator {
 
     /// Seeks to the first key in the block.
     pub fn seek_to_first(&mut self) {
-        let (key_st, key_ed) = parse_range(&self.block.data[..]);
-        let value_range = parse_range(&self.block.data[key_ed..]);
+        let (key_st, key_ed) = parse_range(&self.block.data[..], 0);
+        let value_range = parse_range(&self.block.data[..], key_ed);
 
         let key = self.block.data[key_st..key_ed].to_vec();
 
@@ -114,15 +116,15 @@ impl BlockIterator {
     /// Move to the next key in the block.
     pub fn next(&mut self) {
         // If already reached the end, set empty key and return.
-        if self.idx.eq(&self.block.offsets.len()) {
+        if self.idx == self.block.offsets.len() - 1 {
             self.key = KeyVec::new();
             return;
         }
 
         self.idx += 1;
         let offset = self.block.offsets[self.idx];
-        let (key_st, key_ed) = parse_range(&self.block.data[offset as usize..]);
-        let value_range = parse_range(&self.block.data[key_ed..]);
+        let (key_st, key_ed) = parse_range(&self.block.data[..], offset as usize);
+        let value_range = parse_range(&self.block.data[..], key_ed);
 
         self.key = KeyVec::from_vec(self.block.data[key_st..key_ed].to_vec());
         self.value_range = value_range;
@@ -134,8 +136,8 @@ impl BlockIterator {
     pub fn seek_to_key(&mut self, key: KeySlice) {
         let (idx, offset) = self.block.find_offset(key.raw_ref());
 
-        let (key_st, key_ed) = parse_range(&self.block.data[offset as usize..]);
-        let value_range = parse_range(&self.block.data[key_ed..]);
+        let (key_st, key_ed) = parse_range(&self.block.data[..], offset as usize);
+        let value_range = parse_range(&self.block.data[..], key_ed);
 
         let key_raw = self.block.data[key_st..key_ed].to_vec();
 
@@ -148,9 +150,9 @@ impl BlockIterator {
 /// Parse range of next item.
 ///
 /// Please refer to the structure of `Entry` in `super::Block`.
-fn parse_range(data: &[u8]) -> (usize, usize) {
+fn parse_range(data: &[u8], offset: usize) -> (usize, usize) {
     let len = u16::from_le_bytes(
-        <[u8; 2]>::try_from(&data[0..2]).expect("unexpected error when parsing len"),
+        <[u8; 2]>::try_from(&data[offset..offset + 2]).expect("unexpected error when parsing len"),
     ) as usize;
-    (2, len + 2)
+    (offset + 2, offset + len + 2)
 }

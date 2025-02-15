@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
@@ -34,7 +33,7 @@ use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::StorageIterator;
 use crate::lsm_iterator::{ForegroundIterator, FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
-use crate::mem_table::MemTable;
+use crate::mem_table::{map_bound, MemTable};
 use crate::mvcc::LsmMvccInner;
 use crate::table::SsTable;
 
@@ -402,7 +401,7 @@ impl LsmStorageInner {
     }
 
     /// Force freeze the current memtable to an immutable memtable
-    pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
         let mut guard = self.state.write();
         let mut snapshot = guard.as_ref().clone();
         let new_memtable = MemTable::create(self.next_sst_id());
@@ -450,12 +449,33 @@ impl LsmStorageInner {
         self.scan(lower, upper)
     }
 
+    #[allow(dead_code)]
     pub fn scan_foreguard(
         &self,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
     ) -> Result<ForegroundIterator<LsmIterator>> {
-        todo!()
+        let period = std::time::Duration::from_secs(3);
+
+        let guard = self.state.read();
+
+        let snapshot = guard.imm_memtables.clone();
+        let mut iters = Vec::with_capacity(guard.imm_memtables.len() + 1);
+
+        // Prepare iters.
+        iters.push(Box::new(guard.memtable.scan(lower, upper)));
+        for imm in snapshot {
+            iters.push(Box::new(imm.scan(lower, upper)));
+        }
+
+        let merge_iter = MergeIterator::create(iters);
+        let lsm_iter = LsmIterator::new(merge_iter)?;
+        Ok(ForegroundIterator::new(
+            Arc::clone(&self.state),
+            period,
+            lsm_iter,
+            map_bound(upper),
+        ))
     }
 
     pub fn list_all_items(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) {
