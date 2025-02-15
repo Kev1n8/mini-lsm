@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
+
+const KEY_VALUE_LEN: usize = 4;
 
 /// Builds a block.
 pub struct BlockBuilder {
@@ -34,22 +33,68 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     /// Creates a new block builder.
     pub fn new(block_size: usize) -> Self {
-        unimplemented!()
+        Self {
+            offsets: Vec::new(),
+            data: Vec::new(),
+            block_size,
+            first_key: KeyVec::new(),
+        }
     }
 
     /// Adds a key-value pair to the block. Returns false when the block is full.
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
-        unimplemented!()
+        let key_raw = Vec::from(key.raw_ref());
+        let new_entry_len = key_raw.len() + value.len() + KEY_VALUE_LEN;
+        let current_block_len = self.data.len() + self.offsets.len() * 2;
+
+        // Only the first key-value larger than block_size is allowed.
+        if new_entry_len + current_block_len >= self.block_size && !self.is_empty() {
+            return false;
+        }
+
+        if self.is_empty() {
+            self.first_key = KeyVec::from_vec(key_raw.clone());
+        }
+
+        // Convert to an Entry and push, record offset by the way.
+        let entry = build_entry(&key_raw, value);
+        let offset = self.data.len() as u16;
+        for part in entry {
+            self.data.push(part);
+        }
+
+        // Now update self.offset.
+        self.offsets.push(offset);
+
+        true
     }
 
     /// Check if there is no key-value pair in the block.
     pub fn is_empty(&self) -> bool {
-        unimplemented!()
+        self.offsets.is_empty()
     }
 
     /// Finalize the block.
     pub fn build(self) -> Block {
-        unimplemented!()
+        Block {
+            data: self.data,
+            offsets: self.offsets,
+        }
     }
+}
+
+fn build_entry(key: &[u8], val: &[u8]) -> Vec<u8> {
+    let mut key_part = build_part(key);
+    let mut value_part = build_part(val);
+
+    key_part.append(&mut value_part);
+    key_part
+}
+
+fn build_part(data: &[u8]) -> Vec<u8> {
+    let len = (data.len() as u16).to_le_bytes();
+    let mut part = Vec::from(len.as_ref());
+    part.extend_from_slice(data);
+    part
 }
