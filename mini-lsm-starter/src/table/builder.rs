@@ -125,7 +125,17 @@ impl SsTableBuilder {
         let extra = (block_meta_offset as u32).to_le_bytes();
         data.extend_from_slice(extra.as_slice());
 
+        let datasz = data.len();
         let file = FileObject::create(path.as_ref(), data)?;
+        println!("SST built, info:");
+        println!("    block_num: {}", block_meta.len());
+        println!(
+            "    first_key: {:?}, last_key: {:?}",
+            Bytes::copy_from_slice(first_key.raw_ref()),
+            Bytes::copy_from_slice(last_key.raw_ref()),
+        );
+        println!("    data size: {}", datasz);
+
         Ok(SsTable {
             file,
             block_meta,
@@ -142,5 +152,52 @@ impl SsTableBuilder {
     #[cfg(test)]
     pub(crate) fn build_for_test(self, path: impl AsRef<Path>) -> Result<SsTable> {
         self.build(0, None, path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_sst_encodec_single_block() {
+        let mut builder = SsTableBuilder::new(100);
+        builder.add(KeySlice::from_slice(b"key_001"), b"val_001");
+        builder.add(KeySlice::from_slice(b"key_002"), b"val_002");
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("basic_encode_decode.sst");
+        let sst_expected = builder.build(0, None, path.clone()).unwrap();
+
+        let file = FileObject::open(&path).unwrap();
+        let sst = SsTable::open(0, None, file).unwrap();
+
+        assert_eq!(sst.block_meta_offset, sst_expected.block_meta_offset);
+        assert_eq!(sst.first_key, sst_expected.first_key);
+        assert_eq!(sst.last_key, sst_expected.last_key);
+        assert_eq!(sst.block_meta, sst_expected.block_meta);
+    }
+
+    #[test]
+    fn test_sst_encodec_several_blocks() {
+        let mut builder = SsTableBuilder::new(1);
+        builder.add(KeySlice::from_slice(b"key_001"), b"val_001");
+        builder.add(KeySlice::from_slice(b"key_002"), b"val_002");
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("basic_encode_decode.sst");
+        let sst_expected = builder.build(0, None, path.clone()).unwrap();
+
+        let file = FileObject::open(&path).unwrap();
+        let sst = SsTable::open(0, None, file).unwrap();
+
+        assert_eq!(sst.block_meta.len(), 2);
+
+        assert_eq!(sst.block_meta_offset, sst_expected.block_meta_offset);
+        assert_eq!(sst.first_key, sst_expected.first_key);
+        assert_eq!(sst.last_key, sst_expected.last_key);
+        assert_eq!(sst.block_meta, sst_expected.block_meta);
     }
 }

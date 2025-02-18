@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::key::{KeySlice, KeyVec};
 
-use super::Block;
+use super::{parse_range, Block};
 
 /// Iterates on a block.
 pub struct BlockIterator {
@@ -32,11 +32,32 @@ pub struct BlockIterator {
     idx: usize,
     /// The first key in the block
     first_key: KeyVec,
+    /// The iter could be a dummy iter, meaning that it is invalid and not for any usage.
+    dummy: bool,
 }
 
 impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
         Self {
+            block,
+            key: KeyVec::new(),
+            value_range: (0, 0),
+            idx: 0,
+            first_key: KeyVec::new(),
+            dummy: false,
+        }
+    }
+
+    /// Creates a dummy block iterator.
+    ///
+    /// Should only be used with an invalid SST iterator.
+    pub fn create_dummy() -> Self {
+        let block = Arc::new(Block {
+            data: Vec::new(),
+            offsets: Vec::new(),
+        });
+        Self {
+            dummy: true,
             block,
             key: KeyVec::new(),
             value_range: (0, 0),
@@ -60,6 +81,7 @@ impl BlockIterator {
             value_range,
             idx: 0,
             first_key: KeyVec::from_vec(first_key),
+            dummy: false,
         }
     }
 
@@ -80,6 +102,7 @@ impl BlockIterator {
             value_range,
             idx,
             first_key: KeyVec::from_vec(key_raw),
+            dummy: false,
         }
     }
 
@@ -145,14 +168,4 @@ impl BlockIterator {
         self.value_range = value_range;
         self.idx = idx;
     }
-}
-
-/// Parse range of next item.
-///
-/// Please refer to the structure of `Entry` in `super::Block`.
-fn parse_range(data: &[u8], offset: usize) -> (usize, usize) {
-    let len = u16::from_le_bytes(
-        <[u8; 2]>::try_from(&data[offset..offset + 2]).expect("unexpected error when parsing len"),
-    ) as usize;
-    (offset + 2, offset + len + 2)
 }

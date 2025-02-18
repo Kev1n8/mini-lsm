@@ -28,7 +28,7 @@ pub use builder::SsTableBuilder;
 use bytes::{Buf, Bytes};
 pub use iterator::SsTableIterator;
 
-use crate::block::Block;
+use crate::block::{Block, BlockIterator};
 use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 
@@ -145,7 +145,7 @@ impl FileObject {
 }
 
 /// An SSTable.
-/// 
+///
 /// SSTable Layout:
 /// -------------------------------------------------------------------------------------------
 /// |         Block Section         |          Meta Section         |          Extra          |
@@ -177,7 +177,7 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let data = file.read(0, file.1)?;
-        
+
         // Parse block_offset.
         let len = data.len();
         let block_offset_raw: [u8; 4] = data[len - 4..].try_into().unwrap(); // Safety: Length is guarenteed.
@@ -227,7 +227,7 @@ impl SsTable {
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
         let offset = self.block_meta[block_idx].offset as u64;
         let len = if block_idx == self.block_meta.len() - 1 {
-            self.file.1
+            self.block_meta_offset as u64 - offset
         } else {
             self.block_meta[block_idx + 1].offset as u64 - offset
         };
@@ -241,10 +241,44 @@ impl SsTable {
     }
 
     /// Find the block that may contain `key`.
-    /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
-    /// You may also assume the key-value pairs stored in each consecutive block are sorted.
+    ///
+    /// Return `block.len()` if key not found (for sure).
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        unimplemented!()
+        // Binary search by first_key.
+        match self
+            .block_meta
+            .binary_search_by_key(&key, |blk| blk.first_key.as_key_slice())
+        {
+            Ok(idx) => {
+                // Simply found it. Rare situation.
+                idx
+            }
+            Err(idx) => {
+                // Normally, idx would be the next blk_idx of what we actually want.
+                // Unless:
+                // 1. The last key of block idx is smaller than key
+                // 2. idx == blks_num
+                if idx == 0 {
+                    return idx;
+                }
+
+                if self.block_meta[idx - 1].last_key.as_key_slice() < key {
+                    idx
+                } else {
+                    idx - 1
+                }
+            }
+        }
+    }
+
+    /// Get block iterator of given idx and key.
+    fn get_block_iter(&self, idx: usize, key: Option<KeySlice>) -> Result<BlockIterator> {
+        let block = self.read_block_cached(idx)?;
+        if let Some(key) = key {
+            Ok(BlockIterator::create_and_seek_to_key(block, key))
+        } else {
+            Ok(BlockIterator::create_and_seek_to_first(block))
+        }
     }
 
     /// Get number of data blocks.
