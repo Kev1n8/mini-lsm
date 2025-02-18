@@ -22,6 +22,8 @@ pub use iterator::BlockIterator;
 const ERR_MSG: &str = "block touched outside memory unexpectedly";
 
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
+/// 
+/// TODO(Kaifeng): Split Block into DataBlock and OffsetBlock.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Block {
     pub(crate) data: Vec<u8>,
