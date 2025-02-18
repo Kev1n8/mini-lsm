@@ -120,6 +120,35 @@ impl Block {
         }
         (self.offsets.len() - 1, *self.offsets.last().expect(ERR_MSG))
     }
+
+    /// Return the first key of the block.
+    pub fn first_key(&self) -> &[u8] {
+        if self.offsets.is_empty() {
+            panic!("calling `first_key` on an empty block")
+        }
+        let (st, ed) = parse_range(&self.data, 0);
+        &self.data[st..ed]
+    }
+
+    /// Return the last key of the block.
+    pub fn last_key(&self) -> &[u8] {
+        if self.offsets.is_empty() {
+            panic!("calling `last_key` on an empty block")
+        }
+        let offset = self.offsets.last().unwrap();
+        let (st, ed) = parse_range(&self.data, *offset as usize);
+        &self.data[st..ed]
+    }
+}
+
+/// Parse range of next item.
+///
+/// Please refer to the structure of `Entry` in `super::Block`.
+fn parse_range(data: &[u8], offset: usize) -> (usize, usize) {
+    let len = u16::from_le_bytes(
+        <[u8; 2]>::try_from(&data[offset..offset + 2]).expect("unexpected error when parsing len"),
+    ) as usize;
+    (offset + 2, offset + len + 2)
 }
 
 #[cfg(test)]
