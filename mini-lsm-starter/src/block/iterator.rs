@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::key::{KeySlice, KeyVec};
 
-use super::Block;
+use super::{parse_range, Block};
 
 /// Iterates on a block.
 pub struct BlockIterator {
@@ -32,23 +32,12 @@ pub struct BlockIterator {
     idx: usize,
     /// The first key in the block
     first_key: KeyVec,
+    /// The iter could be a dummy iter, meaning that it is invalid and not for any usage.
+    dummy: bool,
 }
 
 impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
-        Self {
-            block,
-            key: KeyVec::new(),
-            value_range: (0, 0),
-            idx: 0,
-            first_key: KeyVec::new(),
-        }
-    }
-
-    /// Creates a block iterator and seek to the first entry.
-    pub fn create_and_seek_to_first(block: Arc<Block>) -> Self {
-        debug_assert!(!block.offsets.is_empty(), "sstable block is empty");
-
         let (key_st, key_ed) = parse_range(&block.data[..], 0);
         let value_range = parse_range(&block.data[..], key_ed);
 
@@ -60,27 +49,40 @@ impl BlockIterator {
             value_range,
             idx: 0,
             first_key: KeyVec::from_vec(first_key),
+            dummy: false,
         }
+    }
+
+    /// Creates a dummy block iterator.
+    ///
+    /// Should only be used with an invalid SST iterator.
+    pub fn create_dummy() -> Self {
+        let block = Arc::new(Block {
+            data: Vec::new(),
+            offsets: Vec::new(),
+        });
+        Self {
+            dummy: true,
+            block,
+            key: KeyVec::new(),
+            value_range: (0, 0),
+            idx: 0,
+            first_key: KeyVec::new(),
+        }
+    }
+
+    /// Creates a block iterator and seek to the first entry.
+    pub fn create_and_seek_to_first(block: Arc<Block>) -> Self {
+        debug_assert!(!block.offsets.is_empty(), "sstable block is empty");
+        Self::new(block)
     }
 
     /// Creates a block iterator and seek to the first key that >= `key`.
     pub fn create_and_seek_to_key(block: Arc<Block>, key: KeySlice) -> Self {
         debug_assert!(!block.offsets.is_empty(), "sstable block is empty");
-
-        let (idx, offset) = block.find_offset(key.raw_ref());
-
-        let (key_st, key_ed) = parse_range(&block.data[..], offset as usize);
-        let value_range = parse_range(&block.data[..], key_ed);
-
-        let key_raw = block.data[key_st..key_ed].to_vec();
-
-        Self {
-            block,
-            key: KeyVec::from_vec(key_raw.clone()),
-            value_range,
-            idx,
-            first_key: KeyVec::from_vec(key_raw),
-        }
+        let mut iter = Self::new(block);
+        iter.seek_to_key(key);
+        iter
     }
 
     /// Returns the key of the current entry.
@@ -145,14 +147,4 @@ impl BlockIterator {
         self.value_range = value_range;
         self.idx = idx;
     }
-}
-
-/// Parse range of next item.
-///
-/// Please refer to the structure of `Entry` in `super::Block`.
-fn parse_range(data: &[u8], offset: usize) -> (usize, usize) {
-    let len = u16::from_le_bytes(
-        <[u8; 2]>::try_from(&data[offset..offset + 2]).expect("unexpected error when parsing len"),
-    ) as usize;
-    (offset + 2, offset + len + 2)
 }
