@@ -24,7 +24,7 @@ use super::StorageIterator;
 pub struct TwoMergeIterator<A: StorageIterator, B: StorageIterator> {
     a: A,
     b: B,
-    // Add fields as need
+    at_a: bool,
 }
 
 impl<
@@ -32,8 +32,29 @@ impl<
         B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
     > TwoMergeIterator<A, B>
 {
+    /// Create a TwoMergeIterator.
+    ///
+    /// Get the iter ready.
     pub fn create(a: A, b: B) -> Result<Self> {
-        unimplemented!()
+        let (a, mut b) = (a, b);
+
+        let at_a = match (a.is_valid(), b.is_valid()) {
+            (true, true) => {
+                if a.key() <= b.key() {
+                    if a.key() == b.key() {
+                        b.next()?;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            (true, false) => true,
+            (false, true) => false,
+            (false, false) => false,
+        };
+
+        Ok(Self { a, b, at_a })
     }
 }
 
@@ -45,18 +66,67 @@ impl<
     type KeyType<'a> = A::KeyType<'a>;
 
     fn key(&self) -> Self::KeyType<'_> {
-        unimplemented!()
+        if self.at_a {
+            self.a.key()
+        } else {
+            self.b.key()
+        }
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        if self.at_a {
+            self.a.value()
+        } else {
+            self.b.value()
+        }
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        if self.at_a {
+            self.a.is_valid()
+        } else {
+            self.b.is_valid()
+        }
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        match (self.a.is_valid(), self.b.is_valid()) {
+            (true, true) => {
+                // First discuss which iter is on.
+                if self.at_a {
+                    // Then make sure the other iter has different key.
+                    while self.b.is_valid() && self.a.key() == self.b.key() {
+                        self.b.next()?;
+                    }
+                    // Now update iter on.
+                    self.a.next()?;
+                    // Check if it's necessary to "swap".
+                    if !self.a.is_valid() || (self.b.is_valid() && self.b.key() < self.a.key()) {
+                        self.at_a = false;
+                    }
+                    // If a is invalid after `next`, does not matter.
+                    Ok(())
+                } else {
+                    while self.a.is_valid() && self.a.key() == self.b.key() {
+                        self.a.next()?;
+                    }
+                    self.b.next()?;
+                    // If the key is equal, we use self.a.
+                    if !self.b.is_valid() || (self.a.is_valid() && self.a.key() <= self.b.key()) {
+                        self.at_a = true;
+                    }
+                    Ok(())
+                }
+            }
+            (true, false) => {
+                self.at_a = true;
+                self.a.next()
+            }
+            (false, true) => {
+                self.at_a = false;
+                self.b.next()
+            }
+            (false, false) => Ok(()), // Do nothing.
+        }
     }
 }

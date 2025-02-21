@@ -136,7 +136,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
             }
         }
 
-        // Not the `top` is either `None` or it has a different key compared with `current`.
+        // Now the `top` is either `None` or it has a different key compared with `current`.
         current.1.next()?; // Is this a good practice? Maybe need to handle it.
 
         // `current` could be invalid.
