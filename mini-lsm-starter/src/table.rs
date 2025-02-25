@@ -74,6 +74,11 @@ impl BlockMeta {
             let last_key = meta.last_key.raw_ref();
             v.extend_from_slice(last_key);
 
+            println!(
+                "BlockMeta: offset={}, first_key={:?}, last_key={:?}",
+                meta.offset, meta.first_key, meta.last_key
+            );
+
             buf.append(&mut v);
         }
     }
@@ -148,11 +153,11 @@ impl FileObject {
 /// An SSTable.
 ///
 /// SSTable Layout:
-/// -------------------------------------------------------------------------------------------
-/// |         Block Section         |          Meta Section         |          Extra          |
-/// -------------------------------------------------------------------------------------------
-/// | data block | ... | data block |            metadata           | meta block offset (u32) |
-/// -------------------------------------------------------------------------------------------
+/// --------------------------------------------------------------------------------------------------
+/// |         Block Section         |                           Meta Section                         |
+/// --------------------------------------------------------------------------------------------------
+/// | data block | ... | data block | metadata | meta block offset (u32) | bloom data | bloom offset |
+/// --------------------------------------------------------------------------------------------------
 pub struct SsTable {
     /// The actual storage unit of SsTable, the format is as above.
     pub(crate) file: FileObject,
@@ -178,14 +183,26 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let data = file.read(0, file.1)?;
+        let len = data.len();
+
+        // Parse Bloom filter.
+        // Safety: Length is guarenteed.
+        let mut st = len - 4;
+        let bloom_filter_offset = u32::from_le_bytes(data[st..].try_into().unwrap()) as usize;
+
+        let mut ed = st;
+        st = bloom_filter_offset;
+        let bloom_filter = Bloom::decode(&data[st..ed])?;
 
         // Parse block_offset.
-        let len = data.len();
-        let block_offset_raw: [u8; 4] = data[len - 4..].try_into().unwrap(); // Safety: Length is guarenteed.
-        let block_meta_offset = u32::from_le_bytes(block_offset_raw) as usize;
+        ed = bloom_filter_offset;
+        st = ed - 4;
+        let block_meta_offset = u32::from_le_bytes(data[st..ed].try_into().unwrap()) as usize;
 
         // Parse metadata.
-        let block_meta = BlockMeta::decode_block_meta(&data[block_meta_offset..len - 4]);
+        ed = st;
+        st = block_meta_offset;
+        let block_meta = BlockMeta::decode_block_meta(&data[st..ed]);
 
         // Parse first_key and last_key.
         let first_key = block_meta.first().unwrap().first_key.clone();
@@ -199,7 +216,7 @@ impl SsTable {
             block_cache,
             first_key,
             last_key,
-            bloom: None,
+            bloom: Some(bloom_filter),
             max_ts: 0,
         })
     }
@@ -317,6 +334,11 @@ impl SsTable {
     }
 
     pub fn key_within(&self, key: KeySlice) -> bool {
+        if let Some(bloom) = &self.bloom {
+            if !bloom.may_contain(farmhash::fingerprint32(key.raw_ref())) {
+                return false;
+            }
+        }
         self.first_key.as_key_slice() <= key && key <= self.last_key.as_key_slice()
     }
 

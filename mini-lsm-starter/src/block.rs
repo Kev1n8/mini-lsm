@@ -28,6 +28,7 @@ const ERR_MSG: &str = "block touched outside memory unexpectedly";
 pub struct Block {
     pub(crate) data: Vec<u8>,
     pub(crate) offsets: Vec<u16>,
+    last_key: Vec<u8>,
 }
 
 impl Block {
@@ -39,7 +40,7 @@ impl Block {
     /// | Entry #1 | Entry #2 | ... | Entry #N | Offset #1 | Offset #2 | ... | Offset #N | num_of_elements |
     /// ----------------------------------------------------------------------------------------------------
     ///
-    /// Entry:
+    /// Entry(with out prefix):
     ///
     /// -----------------------------------------------------------------------
     /// |                           Entry #1                            | ... |
@@ -99,7 +100,13 @@ impl Block {
 
         let data = data.into_iter().flatten().collect::<Vec<_>>();
 
-        Self { data, offsets }
+        let last_key = Block::init_last_key(&offsets, raw);
+
+        Self {
+            data,
+            offsets,
+            last_key,
+        }
     }
 
     /// Return the offset of given start key.
@@ -108,15 +115,17 @@ impl Block {
             return (0, 0);
         }
         // TODO: Use binary search.
+        let first_key = self.first_key();
         for (i, &offset) in self.offsets.iter().enumerate() {
-            let key_len = u16::from_le_bytes(
-                self.data[offset as usize..offset as usize + 2]
-                    .try_into()
-                    .expect(ERR_MSG),
-            ) as usize;
-            let key_start = offset as usize + 2;
-            let key_end = key_start + key_len;
-            if &self.data[key_start..key_end] >= key {
+            let (rest_st, rest_ed, common_len) = parse_key_range(&self.data, offset as usize);
+            let cur_key = Vec::from_iter(
+                first_key[..common_len]
+                    .iter()
+                    .cloned()
+                    .chain(self.data[rest_st..rest_ed].iter().cloned()),
+            );
+
+            if cur_key.as_slice() >= key {
                 return (i, offset);
             }
         }
@@ -128,7 +137,7 @@ impl Block {
         if self.offsets.is_empty() {
             panic!("calling `first_key` on an empty block")
         }
-        let (st, ed) = parse_range(&self.data, 0);
+        let (st, ed, _common_len_is_zero) = parse_key_range(&self.data, 0);
         &self.data[st..ed]
     }
 
@@ -137,16 +146,44 @@ impl Block {
         if self.offsets.is_empty() {
             panic!("calling `last_key` on an empty block")
         }
-        let offset = self.offsets.last().unwrap();
-        let (st, ed) = parse_range(&self.data, *offset as usize);
-        &self.data[st..ed]
+        &self.last_key
+    }
+
+    pub fn init_last_key(offsets: &[u16], data: &[u8]) -> Vec<u8> {
+        let offset = offsets.last().unwrap();
+        let (rest_st, rest_ed, common_len) = parse_key_range(data, *offset as usize);
+        let rest = &data[rest_st..rest_ed];
+
+        // Could be the first key.(only contains 1 key in this block)
+        if common_len.eq(&0) {
+            rest.to_vec()
+        } else {
+            let (st, _ed, _common_len_is_zero) = parse_key_range(data, 0);
+            let prefix = &data[st..st + common_len];
+            let mut last_key = Vec::with_capacity(prefix.len() + rest.len());
+            last_key.extend_from_slice(prefix);
+            last_key.extend_from_slice(rest);
+            last_key
+        }
     }
 }
 
-/// Parse range of next item.
+/// Parse range of next key.
 ///
-/// Please refer to the structure of `Entry` in `super::Block`.
-fn parse_range(data: &[u8], offset: usize) -> (usize, usize) {
+/// Return (rest_key_st, rest_key_ed, common_prefix_len).
+fn parse_key_range(data: &[u8], offset: usize) -> (usize, usize, usize) {
+    let overlapping_len = u16::from_le_bytes(
+        <[u8; 2]>::try_from(&data[offset..offset + 2]).expect("unexpected error when parsing len"),
+    ) as usize;
+    let rest_len = u16::from_le_bytes(
+        <[u8; 2]>::try_from(&data[offset + 2..offset + 4])
+            .expect("unexpected error when parsing len"),
+    ) as usize;
+    (offset + 4, offset + rest_len + 4, overlapping_len)
+}
+
+/// Parse range of next value.
+fn parse_value_range(data: &[u8], offset: usize) -> (usize, usize) {
     let len = u16::from_le_bytes(
         <[u8; 2]>::try_from(&data[offset..offset + 2]).expect("unexpected error when parsing len"),
     ) as usize;
@@ -166,14 +203,17 @@ mod tests {
 
     #[test]
     fn basic_encoding_decoding() {
-        let key = [1u8, 2, 3];
         let value = [4u8, 5, 6];
         let len = 3u16.to_le_bytes(); // len of key and value.
+
+        let key = [1u8, 2, 3];
+        let overlapping_len = 0u16.to_le_bytes();
+        let rest_key_len = 3u16.to_le_bytes();
 
         let key = Vec::from(key);
         let value = Vec::from(value);
 
-        let key_part = concat_bytes(len.as_ref(), key.as_ref());
+        let key_part = concat_bytes(&concat_bytes(&overlapping_len, &rest_key_len), key.as_ref());
         let value_part = concat_bytes(len.as_ref(), value.as_ref());
         let entry = concat_bytes(&key_part, &value_part);
         let encoded = concat_bytes(&entry, 0u16.to_le_bytes().as_ref());
@@ -182,11 +222,13 @@ mod tests {
         let block = Block {
             data: entry,
             offsets: Vec::from([0u16]),
+            last_key: key.clone(),
         };
 
         assert_eq!(block.encode(), Bytes::from(expected.clone()));
 
         let block_decoded = Block::decode(&expected);
         assert_eq!(block_decoded, block);
+        assert_eq!(block_decoded.last_key, key.clone());
     }
 }

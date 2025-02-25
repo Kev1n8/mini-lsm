@@ -87,6 +87,7 @@ impl SsTableIterator {
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
         let block_num = self.table.block_meta.len();
         let idx = self.table.find_block_idx(key);
+        println!("find idx {} in seek key", idx);
 
         // If idx is invalid.
         if idx.ge(&block_num) {

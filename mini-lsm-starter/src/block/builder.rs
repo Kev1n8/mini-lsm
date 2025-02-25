@@ -16,7 +16,8 @@ use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
 
-const KEY_VALUE_LEN: usize = 4;
+const KEY_PREFIX_LEN: usize = 4;
+const KEY_VALUE_LEN: usize = 2 + KEY_PREFIX_LEN;
 
 /// Builds a block.
 pub struct BlockBuilder {
@@ -45,7 +46,20 @@ impl BlockBuilder {
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         let key_raw = Vec::from(key.raw_ref());
-        let new_entry_len = key_raw.len() + value.len() + KEY_VALUE_LEN;
+
+        let common_prefix_len = if self.is_empty() {
+            self.first_key = KeyVec::from_vec(key_raw.clone());
+            0
+        } else {
+            self.first_key
+                .raw_ref()
+                .iter()
+                .zip(key_raw.iter())
+                .take_while(|(a, b)| a == b)
+                .count()
+        };
+
+        let new_entry_len = key_raw.len() - common_prefix_len + value.len() + KEY_VALUE_LEN;
         let current_block_len = self.data.len() + self.offsets.len() * 2;
 
         // Only the first key-value larger than block_size is allowed.
@@ -53,12 +67,8 @@ impl BlockBuilder {
             return false;
         }
 
-        if self.is_empty() {
-            self.first_key = KeyVec::from_vec(key_raw.clone());
-        }
-
         // Convert to an Entry and push, record offset by the way.
-        let entry = build_entry(&key_raw, value);
+        let entry = build_entry(common_prefix_len, &key_raw, value);
         let offset = self.data.len() as u16;
         for part in entry {
             self.data.push(part);
@@ -77,22 +87,33 @@ impl BlockBuilder {
 
     /// Finalize the block.
     pub fn build(self) -> Block {
+        let last_key = Block::init_last_key(&self.offsets, &self.data);
         Block {
             data: self.data,
             offsets: self.offsets,
+            last_key,
         }
     }
 }
 
-fn build_entry(key: &[u8], val: &[u8]) -> Vec<u8> {
-    let mut key_part = build_part(key);
-    let mut value_part = build_part(val);
+fn build_entry(common_len: usize, key: &[u8], val: &[u8]) -> Vec<u8> {
+    let mut key_part = build_key(common_len, key);
+    let mut value_part = build_value(val);
 
     key_part.append(&mut value_part);
     key_part
 }
 
-fn build_part(data: &[u8]) -> Vec<u8> {
+fn build_key(common_len: usize, key: &[u8]) -> Vec<u8> {
+    let overlapping_len = (common_len as u16).to_le_bytes();
+    let rest_key_len = ((key.len() - common_len) as u16).to_le_bytes();
+    let mut part = Vec::from(overlapping_len.as_ref());
+    part.extend_from_slice(&rest_key_len);
+    part.extend_from_slice(&key[common_len..]);
+    part
+}
+
+fn build_value(data: &[u8]) -> Vec<u8> {
     let len = (data.len() as u16).to_le_bytes();
     let mut part = Vec::from(len.as_ref());
     part.extend_from_slice(data);

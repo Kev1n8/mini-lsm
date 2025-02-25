@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::key::{KeySlice, KeyVec};
 
-use super::{parse_range, Block};
+use super::{parse_key_range, parse_value_range, Block};
 
 /// Iterates on a block.
 pub struct BlockIterator {
@@ -38,8 +38,8 @@ pub struct BlockIterator {
 
 impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
-        let (key_st, key_ed) = parse_range(&block.data[..], 0);
-        let value_range = parse_range(&block.data[..], key_ed);
+        let (key_st, key_ed, _common_len_is_zero) = parse_key_range(&block.data[..], 0);
+        let value_range = parse_value_range(&block.data[..], key_ed);
 
         let first_key = block.data[key_st..key_ed].to_vec();
 
@@ -60,6 +60,7 @@ impl BlockIterator {
         let block = Arc::new(Block {
             data: Vec::new(),
             offsets: Vec::new(),
+            last_key: Vec::new(),
         });
         Self {
             dummy: true,
@@ -104,8 +105,8 @@ impl BlockIterator {
 
     /// Seeks to the first key in the block.
     pub fn seek_to_first(&mut self) {
-        let (key_st, key_ed) = parse_range(&self.block.data[..], 0);
-        let value_range = parse_range(&self.block.data[..], key_ed);
+        let (key_st, key_ed, _common_len_is_zero) = parse_key_range(&self.block.data[..], 0);
+        let value_range = parse_value_range(&self.block.data[..], key_ed);
 
         let key = self.block.data[key_st..key_ed].to_vec();
 
@@ -125,10 +126,13 @@ impl BlockIterator {
 
         self.idx += 1;
         let offset = self.block.offsets[self.idx];
-        let (key_st, key_ed) = parse_range(&self.block.data[..], offset as usize);
-        let value_range = parse_range(&self.block.data[..], key_ed);
+        let (key_st, key_ed, common_len) = parse_key_range(&self.block.data[..], offset as usize);
+        let value_range = parse_value_range(&self.block.data[..], key_ed);
 
-        self.key = KeyVec::from_vec(self.block.data[key_st..key_ed].to_vec());
+        let prefix = self.first_key.raw_ref()[..common_len].to_vec();
+        let rest_key = self.block.data[key_st..key_ed].to_vec();
+
+        self.key = KeyVec::from_vec(Vec::from_iter(prefix.into_iter().chain(rest_key)));
         self.value_range = value_range;
     }
 
@@ -138,12 +142,13 @@ impl BlockIterator {
     pub fn seek_to_key(&mut self, key: KeySlice) {
         let (idx, offset) = self.block.find_offset(key.raw_ref());
 
-        let (key_st, key_ed) = parse_range(&self.block.data[..], offset as usize);
-        let value_range = parse_range(&self.block.data[..], key_ed);
+        let (key_st, key_ed, common_len) = parse_key_range(&self.block.data[..], offset as usize);
+        let value_range = parse_value_range(&self.block.data[..], key_ed);
 
-        let key_raw = self.block.data[key_st..key_ed].to_vec();
+        let prefix = self.first_key.raw_ref()[..common_len].to_vec();
+        let rest_key = self.block.data[key_st..key_ed].to_vec();
 
-        self.key = KeyVec::from_vec(key_raw);
+        self.key = KeyVec::from_vec(Vec::from_iter(prefix.into_iter().chain(rest_key)));
         self.value_range = value_range;
         self.idx = idx;
     }
