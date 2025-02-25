@@ -53,43 +53,16 @@ impl<
             (false, true) => false,
             (false, false) => false,
         };
+        let mut iter = Self { a, b, at_a };
 
-        Ok(Self { a, b, at_a })
-    }
-}
-
-impl<
-        A: 'static + StorageIterator,
-        B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
-    > StorageIterator for TwoMergeIterator<A, B>
-{
-    type KeyType<'a> = A::KeyType<'a>;
-
-    fn key(&self) -> Self::KeyType<'_> {
-        if self.at_a {
-            self.a.key()
-        } else {
-            self.b.key()
+        if iter.is_valid() && iter.value().is_empty() {
+            iter.next()?;
         }
+
+        Ok(iter)
     }
 
-    fn value(&self) -> &[u8] {
-        if self.at_a {
-            self.a.value()
-        } else {
-            self.b.value()
-        }
-    }
-
-    fn is_valid(&self) -> bool {
-        if self.at_a {
-            self.a.is_valid()
-        } else {
-            self.b.is_valid()
-        }
-    }
-
-    fn next(&mut self) -> Result<()> {
+    fn next_inner(&mut self) -> Result<()> {
         match (self.a.is_valid(), self.b.is_valid()) {
             (true, true) => {
                 // First discuss which iter is on.
@@ -128,5 +101,55 @@ impl<
             }
             (false, false) => Ok(()), // Do nothing.
         }
+    }
+}
+
+impl<
+        A: 'static + StorageIterator,
+        B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
+    > StorageIterator for TwoMergeIterator<A, B>
+{
+    type KeyType<'a> = A::KeyType<'a>;
+
+    fn key(&self) -> Self::KeyType<'_> {
+        if self.at_a {
+            self.a.key()
+        } else {
+            self.b.key()
+        }
+    }
+
+    fn value(&self) -> &[u8] {
+        if self.at_a {
+            self.a.value()
+        } else {
+            self.b.value()
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        if self.at_a {
+            self.a.is_valid()
+        } else {
+            self.b.is_valid()
+        }
+    }
+
+    /// Next till not tombstone.
+    fn next(&mut self) -> Result<()> {
+        if !self.is_valid() {
+            return Ok(());
+        }
+        loop {
+            self.next_inner()?;
+            if !self.is_valid() || !self.value().is_empty() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.a.num_active_iterators() + self.b.num_active_iterators()
     }
 }

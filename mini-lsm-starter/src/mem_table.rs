@@ -24,7 +24,8 @@ use ouroboros::self_referencing;
 
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
-use crate::table::SsTableBuilder;
+use crate::lsm_storage::BlockCache;
+use crate::table::{SsTable, SsTableBuilder};
 use crate::wal::Wal;
 
 /// A basic mem-table based on crossbeam-skiplist.
@@ -129,9 +130,19 @@ impl MemTable {
         iter
     }
 
-    /// Flush the mem-table to SSTable. Implement in week 1 day 6.
-    pub fn flush(&self, _builder: &mut SsTableBuilder) -> Result<()> {
-        unimplemented!()
+    /// Flush the mem-table to SSTable.
+    pub fn flush(
+        &self,
+        mut builder: SsTableBuilder,
+        block_cache: Option<Arc<BlockCache>>,
+        path: impl AsRef<Path>,
+    ) -> Result<SsTable> {
+        let mut iter = self.scan(Bound::Unbounded, Bound::Unbounded);
+        while iter.is_valid() {
+            builder.add(iter.key(), iter.value());
+            iter.next()?;
+        }
+        builder.build(self.id, block_cache, path)
     }
 
     pub fn id(&self) -> usize {

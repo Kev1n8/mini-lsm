@@ -21,6 +21,7 @@ use bytes::Bytes;
 use tempfile::tempdir;
 
 use super::*;
+use crate::iterators::StorageIterator;
 use crate::{
     iterators::two_merge_iterator::TwoMergeIterator,
     lsm_storage::{LsmStorageInner, LsmStorageOptions},
@@ -140,6 +141,29 @@ fn test_task1_merge_5() {
     let i1 = MockIterator::new(vec![]);
     let mut iter = TwoMergeIterator::create(i1, i2).unwrap();
     check_iter_result_by_key(&mut iter, vec![])
+}
+
+#[test]
+fn test_basic_delete() {
+    let iter_a = MockIterator::new(vec![
+        (Bytes::from_static(b"1"), Bytes::from_static(b"")),
+        (Bytes::from_static(b"2"), Bytes::from_static(b"val_2")),
+        (Bytes::from("3"), Bytes::from("")),
+    ]);
+    let iter_b = MockIterator::new(vec![
+        (Bytes::from("0"), Bytes::from("val_0")),
+        (Bytes::from_static(b"1"), Bytes::from_static(b"val_1")),
+        (Bytes::from_static(b"2"), Bytes::from_static(b"2")),
+        (Bytes::from("3"), Bytes::from("haha")),
+    ]);
+    let mut iter = TwoMergeIterator::create(iter_a, iter_b).unwrap();
+    check_iter_result_by_key(
+        &mut iter,
+        vec![
+            (Bytes::from("0"), Bytes::from("val_0")),
+            (Bytes::from_static(b"2"), Bytes::from_static(b"val_2")),
+        ],
+    );
 }
 
 #[test]

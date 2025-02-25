@@ -15,6 +15,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::fs;
 use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
@@ -37,7 +38,7 @@ use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::{map_bound, MemTable};
 use crate::mvcc::LsmMvccInner;
-use crate::table::{SsTable, SsTableIterator};
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[cfg(feature = "foreground-iterator")]
 use crate::lsm_iterator::foreground_iter::ForegroundIterator;
@@ -175,7 +176,21 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
-        unimplemented!()
+        self.flush_notifier.send(())?;
+        self.compaction_notifier.send(())?;
+        if let Some(handle) = self.flush_thread.lock().as_ref() {
+            while handle.is_finished() {
+                println!("Waiting flush thread to be over.");
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        if let Some(handle) = self.compaction_thread.lock().as_ref() {
+            while handle.is_finished() {
+                println!("Waiting compact thread to be over.");
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        Ok(())
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -301,6 +316,10 @@ impl LsmStorageInner {
         let path = path.as_ref();
         let state = LsmStorageState::create(&options);
 
+        if !path.exists() {
+            fs::create_dir_all(path)?;
+        }
+
         let compaction_controller = match &options.compaction_options {
             CompactionOptions::Leveled(options) => {
                 CompactionController::Leveled(LeveledCompactionController::new(options.clone()))
@@ -368,6 +387,10 @@ impl LsmStorageInner {
         // Find in SsTables.
         for sst_id in snapshot.l0_sstables.iter() {
             if let Some(sst) = snapshot.sstables.get(sst_id) {
+                if !sst.key_within(KeySlice::from_slice(key)) {
+                    continue;
+                }
+
                 let iter = SsTableIterator::create_and_seek_to_key(
                     Arc::clone(sst),
                     KeySlice::from_slice(key),
@@ -428,7 +451,9 @@ impl LsmStorageInner {
         unimplemented!()
     }
 
-    /// Force freeze the current memtable to an immutable memtable
+    /// Force freeze the current memtable to an immutable memtable.
+    ///
+    /// Note that calling this function is with state_lock held.
     pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
         let mut guard = self.state.write();
         let mut snapshot = guard.as_ref().clone();
@@ -441,7 +466,25 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        unimplemented!()
+        let _state_lock = self.state_lock.lock();
+        let mut snapshot = {
+            let guard = self.state.read();
+            guard.as_ref().clone()
+        };
+
+        if let Some(to_flush) = snapshot.imm_memtables.pop() {
+            let builder = SsTableBuilder::new(self.options.block_size);
+            let path = self.path.join(format!("{}.sst", to_flush.id()));
+            let sst = to_flush.flush(builder, Some(Arc::clone(&self.block_cache)), path)?;
+
+            snapshot.l0_sstables.insert(0, sst.sst_id());
+            snapshot.sstables.insert(sst.sst_id(), Arc::new(sst));
+
+            let mut guard = self.state.write();
+            *guard = Arc::new(snapshot);
+        }
+
+        Ok(())
     }
 
     pub fn new_txn(&self) -> Result<()> {
@@ -475,6 +518,11 @@ impl LsmStorageInner {
         let mut sst_iters = Vec::with_capacity(snapshot.l0_sstables.len());
         for sst_id in snapshot.l0_sstables.iter() {
             let iter = if let Some(sst) = snapshot.sstables.get(sst_id) {
+                // Skip if sst is not needed.
+                if !sst.range_overlaps(lower, upper) {
+                    continue;
+                }
+
                 match lower {
                     Bound::Included(key) => SsTableIterator::create_and_seek_to_key(
                         Arc::clone(sst),

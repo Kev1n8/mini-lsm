@@ -37,15 +37,16 @@ pub struct LsmIterator {
 
 impl LsmIterator {
     pub(crate) fn new(iter: LsmIteratorInner, upper: Bound<Bytes>) -> Result<Self> {
-        // The iter could start with tombstones.
+        // The iter could start with tombstones or simply invalid.
         let mut iter = iter;
-        while iter.value().is_empty() {
+        while iter.is_valid() && iter.value().is_empty() {
             iter.next()?;
         }
+        let ended = !iter.is_valid();
         Ok(Self {
             inner: iter,
             upper,
-            ended: false,
+            ended,
         })
     }
 }
@@ -70,13 +71,12 @@ impl StorageIterator for LsmIterator {
         if self.ended {
             return Ok(());
         }
-        // Till not tombstone.
-        loop {
-            self.inner.next()?;
-            if !self.is_valid() || !self.value().is_empty() {
-                break;
-            }
+        self.inner.next()?;
+
+        if !self.inner.is_valid() {
+            self.ended = true;
         }
+
         // Check end.
         match self.upper.as_ref() {
             Bound::Included(end) => {
@@ -92,6 +92,10 @@ impl StorageIterator for LsmIterator {
             Bound::Unbounded => {}
         }
         Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.inner.num_active_iterators()
     }
 }
 
@@ -148,6 +152,10 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
             }
             Ok(())
         }
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.iter.num_active_iterators()
     }
 }
 

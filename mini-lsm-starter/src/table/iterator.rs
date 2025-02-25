@@ -145,7 +145,6 @@ impl StorageIterator for SsTableIterator {
             // Could be invalid.
             if !self.is_valid() {
                 self.blk_iter = BlockIterator::create_dummy();
-                println!("INVALID ITER!, {}", self.blk_idx);
                 return Ok(());
             }
 
