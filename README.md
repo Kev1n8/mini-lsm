@@ -1,23 +1,6 @@
-## Mini-Lsm 
+## Mini-LSM
 
 **This is a forked repository from [skyzh/mini-lsm](https://github.com/skyzh/mini-lsm). Starter folder includes my implementation of mini-lsm.**
-
-
-## Demo
-
-You can run the reference solution by yourself to gain an overview of the system before you start.
-
-```
-cargo run --bin mini-lsm-cli-ref
-cargo run --bin mini-lsm-cli-mvcc-ref
-```
-
-And we have a compaction simulator to experiment with your compaction algorithm implementation,
-
-```
-cargo run --bin compaction-simulator-ref
-cargo run --bin compaction-simulator-mvcc-ref
-```
 
 ## License
 
