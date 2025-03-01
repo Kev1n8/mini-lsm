@@ -1,6 +1,15 @@
 ## Mini-LSM
 
-**This is a forked repository from [skyzh/mini-lsm](https://github.com/skyzh/mini-lsm). Starter folder includes my implementation of mini-lsm.**
+**This repository is forked from [skyzh/mini-lsm](https://github.com/skyzh/mini-lsm). `mini-lsm-starter` folder includes my implementation of mini-lsm.**
+
+## TODO
+
+- [x] Memory read & write (skiplist).
+- [x] Disk read & write (block-based sst).
+- [x] Bloom filter & first-key prefix encoding.
+- [ ] Compaction
+- [ ] WAL
+- [ ] MVCC
 
 ## License
 
